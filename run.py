@@ -5,6 +5,9 @@ Usage:
     python run.py --init-db          # Initialise database schema
     python run.py --run-once         # Run a single window now
     python run.py --continuous       # Run continuous windowed loop
+    python run.py --discord-bot      # Start Discord signal bot
+    python run.py --signals          # Show latest virality signals
+    python run.py --trend <ID>       # Show score trend for a narrative
 """
 import argparse
 import sys
@@ -24,9 +27,10 @@ def main() -> None:
     parser.add_argument("--continuous", action="store_true", help="Run continuous window loop")
     parser.add_argument("--signals", action="store_true", help="Show latest virality signals and exit")
     parser.add_argument("--trend", type=str, metavar="NARRATIVE_ID", help="Show score trend for a narrative")
+    parser.add_argument("--discord-bot", action="store_true", help="Start the Discord signal bot")
     args = parser.parse_args()
 
-    if not any([args.init_db, args.run_once, args.continuous, args.signals, args.trend]):
+    if not any([args.init_db, args.run_once, args.continuous, args.signals, args.trend, args.discord_bot]):
         parser.print_help()
         sys.exit(0)
 
@@ -74,6 +78,11 @@ def main() -> None:
             for t in reversed(trend):
                 bar = "[" + "#" * round(t["virality_score"] * 10) + "-" * (10 - round(t["virality_score"] * 10)) + "]"
                 print(f"  {t['window_time']}  {t['virality_score']:.3f} {bar}  tweets={t['tweet_count']}  authors={t['unique_authors']}")
+
+    if args.discord_bot:
+        logger.info("Starting Discord signal bot...")
+        from mindshare_engine.discord_bot import run_bot
+        run_bot()
 
 
 if __name__ == "__main__":

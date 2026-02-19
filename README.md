@@ -55,6 +55,7 @@ mindshare_engine/
 ├── cluster_engine.py    # Narrative clustering + birth detection + domain assignment
 ├── virality_scorer.py   # Composite virality index (6-dimensional scoring)
 ├── signal_emitter.py    # Bot signal pipeline (webhook delivery + cooldown)
+├── discord_bot.py       # Discord bot with rich embed signal posting
 └── window_runner.py     # 5-min pipeline orchestrator
 ```
 
@@ -97,14 +98,35 @@ Scores are normalised to **[0, 1]** via sigmoid functions. Narratives above the 
 ### Bot Signal Flow
 
 ```
-Window Pipeline → Virality Scorer → Signal Emitter → Webhook → Bot
-                                         ↓
-                                    virality_signals (DB)
-                                         ↓
-                                  --signals CLI / API polling
+Window Pipeline → Virality Scorer → Signal Emitter → virality_signals (DB)
+                                                            ↓
+                                         ┌──────────────────┼──────────────┐
+                                         ↓                  ↓              ↓
+                                   Discord Bot        Webhook POST    CLI / polling
+                                   (rich embeds)      (any consumer)  (--signals)
 ```
 
-Signals are delivered as structured JSON webhooks compatible with any consumer (Telegram, Discord, custom). Per-narrative cooldown prevents spam.
+Signals are stored in Postgres and consumed by any combination of:
+- **Discord bot** — polls DB, posts colour-coded embeds with score bars, component breakdowns, and trend sparklines
+- **Webhook** — structured JSON POST to any endpoint (Telegram, custom)
+- **CLI** — `--signals` and `--trend` commands
+
+### Discord Bot
+
+The built-in Discord bot posts rich embeds with:
+- Colour-coded tiers (🔴 Alert, 🟠 High, 🟡 Signal, 🔵 Watch)
+- Domain emoji icons for quick scanning
+- Component breakdown bars (velocity, acceleration, spread, engagement, influencer, freshness)
+- Trend sparklines across recent windows
+- Top terms extracted from tweets
+- Discord timestamps for relative time display
+
+```bash
+# Start the Discord bot (runs continuously)
+python run.py --discord-bot
+```
+
+Set `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` in your `.env` file.
 
 ### CLI
 
