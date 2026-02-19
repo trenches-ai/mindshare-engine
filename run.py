@@ -10,6 +10,7 @@ Usage:
     python run.py --trend <ID>       # Show score trend for a narrative
 """
 import argparse
+import os
 import sys
 from loguru import logger
 from mindshare_engine.config import LOG_LEVEL, LOG_FILE
@@ -17,7 +18,13 @@ from mindshare_engine.config import LOG_LEVEL, LOG_FILE
 # Configure loguru
 logger.remove()
 logger.add(sys.stdout, level=LOG_LEVEL, format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}")
-logger.add(LOG_FILE, level="DEBUG", rotation="10 MB", retention="7 days")
+
+if LOG_FILE:
+    try:
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        logger.add(LOG_FILE, level="DEBUG", rotation="10 MB", retention="7 days")
+    except OSError:
+        logger.warning("Could not create log file — logging to stdout only")
 
 
 def main() -> None:

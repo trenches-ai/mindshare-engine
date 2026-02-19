@@ -125,28 +125,71 @@ LIFECYCLE_STATES = [
     "dormant",
 ]
 
-# --- Virality scoring ---
+# --- Virality scoring v2 ---
 VIRALITY_WINDOW_LOOKBACK = int(os.getenv("VIRALITY_WINDOW_LOOKBACK", "6"))
 VIRALITY_SIGNAL_THRESHOLD = float(os.getenv("VIRALITY_SIGNAL_THRESHOLD", "0.55"))
 VIRALITY_ALERT_THRESHOLD = float(os.getenv("VIRALITY_ALERT_THRESHOLD", "0.75"))
 
-# Weight presets for composite virality index (must sum to 1.0)
+# v2 weight presets — 7 signals (must sum to 1.0)
 VIRALITY_WEIGHTS = {
-    "velocity":     0.25,
+    "velocity":     0.18,
     "acceleration": 0.20,
     "spread":       0.20,
-    "engagement":   0.15,
+    "engagement":   0.17,
     "influencer":   0.10,
-    "freshness":    0.10,
+    "freshness":    0.05,
+    "emotional":    0.10,
 }
+
+# v2 sigmoid midpoints
+VELOCITY_SURGE_MIDPOINT = 2.5       # ratio vs 30-min baseline
+VELOCITY_COLD_MIDPOINT = 50         # tweet count when no history
+ACCEL_COLD_MIDPOINT = 30            # tweet count proxy when no history
+SPREAD_NEW_AUTHOR_MIDPOINT = 0.55   # 55% new authors = midpoint
+SPREAD_COLD_MIDPOINT = 30           # unique authors when no history
+ENGAGEMENT_MIDPOINT = 6.0           # engagements per tweet
+INFLUENCER_MIDPOINT = 0.06          # 6% high-follower ratio
+FRESHNESS_MIDPOINT_MINUTES = 45     # minutes old = midpoint
+EMOTIONAL_MIDPOINT = 0.65           # normalised arousal+valence score
+
+# v2 post-scoring multipliers
+VISUAL_VIRALITY_THRESHOLD = 0.50    # min fraction of media posts to apply boost
+VISUAL_VIRALITY_MULTIPLIER = 1.12   # score multiplier when visual threshold met
+CATEGORY_QUIET_BOOST = 0.15         # relative velocity/spread boost for quiet domains
+QUIET_DOMAINS = [
+    "nature_animals", "science_knowledge", "environment_climate",
+    "creator_economy", "cultural_identity",
+]
+
+# v2 dynamic reweighting
+SATURATION_THRESHOLD = 0.95         # when velocity+spread both above this
+SATURATION_REDISTRIBUTE = 0.14      # total weight shifted away from saturated signals
+
+# v2 guardrails
+NARRATIVE_AGE_CAP_HOURS = 48        # demote narratives older than this
+NARRATIVE_AGE_DEMOTION = 0.20       # score reduction for stale narratives
+MIN_VISUAL_RATIO_TO_EMIT = 0.0     # min media ratio to emit (0 = disabled, 0.4 = strict)
+FRESHNESS_SUSTAINED_HOURS = 4       # if still accelerating after this, halve decay
+
+# v2 engagement sub-weights (within engagement component)
+ENGAGEMENT_WEIGHT_LIKES_RTS = 0.40
+ENGAGEMENT_WEIGHT_QUOTES_REPLIES = 0.40
+ENGAGEMENT_WEIGHT_MEDIA_BOOST = 0.20
+
+# v2.1 remixability sub-score (inside engagement)
+REMIX_THRESHOLD = 0.30          # min quote-ratio to trigger boost
+REMIX_BOOST = 0.10              # additive boost to engagement sigmoid input
 
 # --- Bot / Webhook ---
 BOT_WEBHOOK_URL = os.getenv("BOT_WEBHOOK_URL", "")
 BOT_WEBHOOK_SECRET = os.getenv("BOT_WEBHOOK_SECRET", "")
 BOT_COOLDOWN_MINUTES = int(os.getenv("BOT_COOLDOWN_MINUTES", "15"))
-BOT_MAX_SIGNALS_PER_WINDOW = int(os.getenv("BOT_MAX_SIGNALS_PER_WINDOW", "10"))
+BOT_MAX_SIGNALS_PER_WINDOW = int(os.getenv("BOT_MAX_SIGNALS_PER_WINDOW", "8"))
 
-# --- Discord bot ---
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
-DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
-DISCORD_POLL_INTERVAL = int(os.getenv("DISCORD_POLL_INTERVAL", "30"))
+# --- Discord webhook alerts ---
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+DISCORD_BOT_NAME = os.getenv("DISCORD_BOT_NAME", "Mindshare Engine")
+DISCORD_BOT_AVATAR_URL = os.getenv("DISCORD_BOT_AVATAR_URL", "")
+DISCORD_ALERT_HIGH_CONVICTION = os.getenv("DISCORD_ALERT_HIGH_CONVICTION", "true").lower() == "true"
+DISCORD_ALERT_MODERATE = os.getenv("DISCORD_ALERT_MODERATE", "false").lower() == "true"
+DISCORD_POST_SUMMARY = os.getenv("DISCORD_POST_SUMMARY", "true").lower() == "true"

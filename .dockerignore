@@ -1,0 +1,16 @@
+.env
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+logs/
+*.log
+.git/
+.gitignore
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursor/

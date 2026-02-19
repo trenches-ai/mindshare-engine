@@ -13,17 +13,38 @@ _pool: pool.SimpleConnectionPool | None = None
 def get_pool() -> pool.SimpleConnectionPool:
     global _pool
     if _pool is None:
-        _pool = pool.SimpleConnectionPool(1, 10, DATABASE_URL)
-        logger.info("DB connection pool created")
+        _pool = pool.SimpleConnectionPool(2, 20, DATABASE_URL)
+        logger.info("DB connection pool created (max=20)")
     return _pool
 
 
 def get_connection() -> psycopg2.extensions.connection:
-    return get_pool().getconn()
+    conn = get_pool().getconn()
+    if conn.closed:
+        get_pool().putconn(conn)
+        _reset_pool()
+        conn = get_pool().getconn()
+    return conn
 
 
 def release_connection(conn: psycopg2.extensions.connection) -> None:
-    get_pool().putconn(conn)
+    try:
+        get_pool().putconn(conn)
+    except Exception:
+        pass
+
+
+def _reset_pool() -> None:
+    """Recreate the pool when connections go stale."""
+    global _pool
+    logger.warning("Resetting DB connection pool (stale connections detected)")
+    try:
+        if _pool:
+            _pool.closeall()
+    except Exception:
+        pass
+    _pool = pool.SimpleConnectionPool(2, 20, DATABASE_URL)
+    logger.info("DB connection pool recreated")
 
 
 def init_db() -> None:
@@ -54,7 +75,8 @@ def init_db() -> None:
                 tweet_count     INT DEFAULT 0,
                 domain_distribution JSONB DEFAULT '{}',
                 features        JSONB DEFAULT '{}',
-                created_at      TIMESTAMPTZ DEFAULT NOW()
+                created_at      TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(narrative_id, window_time)
             );
             CREATE INDEX IF NOT EXISTS idx_nw_narrative_window
                 ON narrative_windows(narrative_id, window_time);
@@ -74,7 +96,8 @@ def init_db() -> None:
                 retweet_count   INT DEFAULT 0,
                 reply_count     INT DEFAULT 0,
                 quote_count     INT DEFAULT 0,
-                like_count      INT DEFAULT 0
+                like_count      INT DEFAULT 0,
+                has_media       BOOLEAN DEFAULT FALSE
             );
             CREATE INDEX IF NOT EXISTS idx_tweets_narrative ON tweets_raw(narrative_id);
             CREATE INDEX IF NOT EXISTS idx_tweets_window ON tweets_raw(window_time);
@@ -153,8 +176,30 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_vs_emitted ON virality_signals(emitted);
         """)
 
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_nw_unique
+                ON narrative_windows(narrative_id, window_time);
+            CREATE INDEX IF NOT EXISTS idx_narratives_updated_at
+                ON narratives(updated_at);
+            CREATE INDEX IF NOT EXISTS idx_narratives_state
+                ON narratives(state);
+            CREATE INDEX IF NOT EXISTS idx_vs_narrative_window
+                ON virality_signals(narrative_id, window_time DESC);
+            CREATE INDEX IF NOT EXISTS idx_vs_emitted_score
+                ON virality_signals(emitted, virality_score DESC);
+            CREATE INDEX IF NOT EXISTS idx_tweets_narrative_window
+                ON tweets_raw(narrative_id, window_time);
+        """)
+
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE tweets_raw ADD COLUMN IF NOT EXISTS has_media BOOLEAN DEFAULT FALSE;
+            EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$;
+        """)
+
         conn.commit()
-        logger.info("Database schema initialised")
+        logger.info("Database schema initialised (v2)")
     except Exception as e:
         conn.rollback()
         logger.error(f"DB init error: {e}")
@@ -176,6 +221,25 @@ def execute(sql: str, params: tuple = (), fetch: bool = False):
     except Exception as e:
         conn.rollback()
         logger.error(f"DB execute error: {e} | SQL: {sql[:120]}")
+        raise
+    finally:
+        cur.close()
+        release_connection(conn)
+
+
+def execute_many(sql: str, params_list: list[tuple]) -> None:
+    """Run the same query with many param sets in a single transaction."""
+    if not params_list:
+        return
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        for params in params_list:
+            cur.execute(sql, params)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"DB execute_many error: {e} | SQL: {sql[:120]}")
         raise
     finally:
         cur.close()

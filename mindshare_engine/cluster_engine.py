@@ -106,7 +106,7 @@ class ClusterEngine:
                 INSERT INTO narrative_windows
                     (narrative_id, window_time, unique_authors, tweet_count, features)
                 VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT DO NOTHING
+                ON CONFLICT (narrative_id, window_time) DO NOTHING
             """, (
                 str(narrative_id),
                 window_time.isoformat(),
@@ -284,8 +284,8 @@ class ClusterEngine:
             execute("""
                 INSERT INTO tweets_raw
                     (tweet_id, narrative_id, author_id, content, embedding, window_time,
-                     retweet_count, reply_count, quote_count, like_count)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     retweet_count, reply_count, quote_count, like_count, has_media)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (tweet_id) DO NOTHING
             """, (
                 tweet["tweet_id"],
@@ -298,6 +298,7 @@ class ClusterEngine:
                 tweet.get("reply_count", 0),
                 tweet.get("quote_count", 0),
                 tweet.get("like_count", 0),
+                tweet.get("has_media", False),
             ))
         except Exception as e:
             logger.error(f"Failed to store tweet {tweet.get('tweet_id')}: {e}")

@@ -13,7 +13,7 @@ from mindshare_engine.embedder import Embedder
 from mindshare_engine.cluster_engine import ClusterEngine
 from mindshare_engine.virality_scorer import ViralityScorer
 from mindshare_engine.signal_emitter import SignalEmitter
-from mindshare_engine.database import execute
+from mindshare_engine.database import execute, execute_many
 
 
 class WindowRunner:
@@ -149,23 +149,31 @@ class WindowRunner:
     # ------------------------------------------------------------------
 
     def _store_authors(self, authors: list[dict]) -> None:
-        """Upsert author records."""
-        for author in authors:
-            try:
-                execute("""
-                    INSERT INTO authors (author_id, username, account_created_at, follower_count, fetched_at)
-                    VALUES (%s, %s, %s, %s, NOW())
-                    ON CONFLICT (author_id) DO UPDATE SET
-                        follower_count = EXCLUDED.follower_count,
-                        fetched_at     = NOW()
-                """, (
-                    author["author_id"],
-                    author.get("username", ""),
-                    author.get("account_created_at"),
-                    author.get("follower_count", 0),
-                ))
-            except Exception as e:
-                logger.error(f"Author store error: {e}")
+        """Batch upsert all author records in a single transaction."""
+        if not authors:
+            return
+        sql = """
+            INSERT INTO authors (author_id, username, account_created_at, follower_count, fetched_at)
+            VALUES (%s, %s, %s, %s, NOW())
+            ON CONFLICT (author_id) DO UPDATE SET
+                username       = EXCLUDED.username,
+                follower_count = EXCLUDED.follower_count,
+                fetched_at     = NOW()
+        """
+        params_list = [
+            (
+                a["author_id"],
+                a.get("username", ""),
+                a.get("account_created_at"),
+                a.get("follower_count", 0),
+            )
+            for a in authors
+        ]
+        try:
+            execute_many(sql, params_list)
+            logger.info(f"Stored {len(authors)} authors (batch)")
+        except Exception as e:
+            logger.error(f"Author batch store error: {e}")
 
     def _update_frontier_from_window(self, tweets: list[dict], window_time: datetime) -> None:
         """

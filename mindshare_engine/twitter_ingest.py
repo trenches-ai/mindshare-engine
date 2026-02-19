@@ -118,7 +118,10 @@ class TwitterIngest:
         kwargs: dict = {
             "query": query,
             "max_results": min(max_results, 100),
-            "tweet_fields": ["created_at", "author_id", "public_metrics", "conversation_id"],
+            "tweet_fields": ["created_at", "author_id", "public_metrics", "conversation_id", "attachments"],
+            "expansions": ["author_id", "attachments.media_keys"],
+            "media_fields": ["type"],
+            "user_fields": ["username"],
         }
         if since_id:
             kwargs["since_id"] = since_id
@@ -130,18 +133,36 @@ class TwitterIngest:
             if not response.data:
                 return []
 
+            user_map = {}
+            if response.includes and "users" in response.includes:
+                for u in response.includes["users"]:
+                    user_map[str(u.id)] = u.username
+
+            media_keys_with_visual = set()
+            if response.includes and "media" in response.includes:
+                for m in response.includes["media"]:
+                    if m.type in ("photo", "video", "animated_gif"):
+                        media_keys_with_visual.add(m.media_key)
+
             results = []
             for tweet in response.data:
                 metrics = tweet.public_metrics or {}
+                author_id = str(tweet.author_id)
+                attachments = tweet.attachments or {}
+                tweet_media_keys = attachments.get("media_keys", []) or []
+                has_media = any(mk in media_keys_with_visual for mk in tweet_media_keys)
+
                 results.append({
                     "tweet_id": str(tweet.id),
-                    "author_id": str(tweet.author_id),
+                    "author_id": author_id,
+                    "author_username": user_map.get(author_id, ""),
                     "content": tweet.text,
                     "created_at": tweet.created_at.isoformat() if tweet.created_at else None,
                     "retweet_count": metrics.get("retweet_count", 0),
                     "reply_count": metrics.get("reply_count", 0),
                     "quote_count": metrics.get("quote_count", 0),
                     "like_count": metrics.get("like_count", 0),
+                    "has_media": has_media,
                 })
             return results
 
