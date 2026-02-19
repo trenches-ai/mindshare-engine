@@ -22,9 +22,11 @@ def main() -> None:
     parser.add_argument("--init-db", action="store_true", help="Initialise the Postgres schema")
     parser.add_argument("--run-once", action="store_true", help="Run a single window and exit")
     parser.add_argument("--continuous", action="store_true", help="Run continuous window loop")
+    parser.add_argument("--signals", action="store_true", help="Show latest virality signals and exit")
+    parser.add_argument("--trend", type=str, metavar="NARRATIVE_ID", help="Show score trend for a narrative")
     args = parser.parse_args()
 
-    if not any([args.init_db, args.run_once, args.continuous]):
+    if not any([args.init_db, args.run_once, args.continuous, args.signals, args.trend]):
         parser.print_help()
         sys.exit(0)
 
@@ -40,13 +42,38 @@ def main() -> None:
         runner = WindowRunner()
         stats = runner.run_window()
         import json
-        print(json.dumps(stats, indent=2))
+        print(json.dumps(stats, indent=2, default=str))
 
     if args.continuous:
         logger.info("Starting continuous mode...")
         from mindshare_engine.window_runner import WindowRunner
         runner = WindowRunner()
         runner.run_continuous()
+
+    if args.signals:
+        from mindshare_engine.signal_emitter import SignalEmitter
+        import json
+        emitter = SignalEmitter()
+        signals = emitter.get_latest_signals(limit=20, min_score=0.0)
+        if not signals:
+            print("No virality signals recorded yet.")
+        else:
+            for s in signals:
+                bar = "[" + "#" * round(s["virality_score"] * 10) + "-" * (10 - round(s["virality_score"] * 10)) + "]"
+                print(f"  {s['virality_score']:.3f} {bar}  {s['label'] or '?':30s}  {s['primary_domain']:25s}  tweets={s['tweet_count']}  authors={s['unique_authors']}")
+            print(f"\n  {len(signals)} signals total")
+
+    if args.trend:
+        from mindshare_engine.signal_emitter import SignalEmitter
+        emitter = SignalEmitter()
+        trend = emitter.get_narrative_trend(args.trend, windows=24)
+        if not trend:
+            print(f"No trend data for narrative {args.trend}")
+        else:
+            print(f"Trend for {args.trend} ({len(trend)} windows):\n")
+            for t in reversed(trend):
+                bar = "[" + "#" * round(t["virality_score"] * 10) + "-" * (10 - round(t["virality_score"] * 10)) + "]"
+                print(f"  {t['window_time']}  {t['virality_score']:.3f} {bar}  tweets={t['tweet_count']}  authors={t['unique_authors']}")
 
 
 if __name__ == "__main__":

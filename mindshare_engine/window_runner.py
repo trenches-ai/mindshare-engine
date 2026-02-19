@@ -11,6 +11,8 @@ from mindshare_engine.frontier_builder import FrontierBuilder
 from mindshare_engine.twitter_ingest import TwitterIngest
 from mindshare_engine.embedder import Embedder
 from mindshare_engine.cluster_engine import ClusterEngine
+from mindshare_engine.virality_scorer import ViralityScorer
+from mindshare_engine.signal_emitter import SignalEmitter
 from mindshare_engine.database import execute
 
 
@@ -26,6 +28,8 @@ class WindowRunner:
         self._frontier = FrontierBuilder()
         self._ingest = TwitterIngest()
         self._cluster = ClusterEngine(self._embedder)
+        self._scorer = ViralityScorer()
+        self._emitter = SignalEmitter()
         logger.info("WindowRunner ready")
 
     # ------------------------------------------------------------------
@@ -80,6 +84,18 @@ class WindowRunner:
 
             # Step 7: Update frontier velocity
             self._update_frontier_from_window(tweets, window_time)
+
+            # Step 8: Virality scoring
+            scored = self._scorer.score_window(window_time)
+            stats["virality"] = {
+                "scored": len(scored),
+                "top_score": scored[0]["virality_score"] if scored else 0,
+                "top_label": scored[0].get("label", "") if scored else "",
+            }
+
+            # Step 9: Signal emission to bot
+            emission_stats = self._emitter.emit(scored, window_time)
+            stats["signals"] = emission_stats
 
             stats["duration_seconds"] = round(time.time() - t0, 2)
             logger.info(f"=== WINDOW DONE: {stats['duration_seconds']}s ===")

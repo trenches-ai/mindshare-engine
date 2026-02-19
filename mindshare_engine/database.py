@@ -130,6 +130,29 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_ft_velocity ON frontier_terms(velocity DESC);
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS virality_signals (
+                id              BIGSERIAL PRIMARY KEY,
+                narrative_id    UUID REFERENCES narratives(id) ON DELETE CASCADE,
+                window_time     TIMESTAMPTZ,
+                virality_score  FLOAT DEFAULT 0,
+                components      JSONB DEFAULT '{}',
+                state           TEXT DEFAULT 'incubating',
+                label           TEXT,
+                primary_domain  TEXT,
+                tweet_count     INT DEFAULT 0,
+                unique_authors  INT DEFAULT 0,
+                top_terms       JSONB DEFAULT '[]',
+                emitted         BOOLEAN DEFAULT FALSE,
+                emitted_at      TIMESTAMPTZ,
+                created_at      TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(narrative_id, window_time)
+            );
+            CREATE INDEX IF NOT EXISTS idx_vs_window ON virality_signals(window_time);
+            CREATE INDEX IF NOT EXISTS idx_vs_score ON virality_signals(virality_score DESC);
+            CREATE INDEX IF NOT EXISTS idx_vs_emitted ON virality_signals(emitted);
+        """)
+
         conn.commit()
         logger.info("Database schema initialised")
     except Exception as e:

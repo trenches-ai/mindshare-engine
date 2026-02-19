@@ -124,3 +124,24 @@ LIFECYCLE_STATES = [
     "declining",
     "dormant",
 ]
+
+# --- Virality scoring ---
+VIRALITY_WINDOW_LOOKBACK = int(os.getenv("VIRALITY_WINDOW_LOOKBACK", "6"))
+VIRALITY_SIGNAL_THRESHOLD = float(os.getenv("VIRALITY_SIGNAL_THRESHOLD", "0.55"))
+VIRALITY_ALERT_THRESHOLD = float(os.getenv("VIRALITY_ALERT_THRESHOLD", "0.75"))
+
+# Weight presets for composite virality index (must sum to 1.0)
+VIRALITY_WEIGHTS = {
+    "velocity":     0.25,
+    "acceleration": 0.20,
+    "spread":       0.20,
+    "engagement":   0.15,
+    "influencer":   0.10,
+    "freshness":    0.10,
+}
+
+# --- Bot / Webhook ---
+BOT_WEBHOOK_URL = os.getenv("BOT_WEBHOOK_URL", "")
+BOT_WEBHOOK_SECRET = os.getenv("BOT_WEBHOOK_SECRET", "")
+BOT_COOLDOWN_MINUTES = int(os.getenv("BOT_COOLDOWN_MINUTES", "15"))
+BOT_MAX_SIGNALS_PER_WINDOW = int(os.getenv("BOT_MAX_SIGNALS_PER_WINDOW", "10"))

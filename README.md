@@ -5,7 +5,8 @@ Real-time Twitter/X attention dynamics engine. Detects emerging narratives, trac
 ## Architecture
 
 Built in 4 phases (see docs/):
-- **Phase A** ✅ — Core ingestion + clustering (this codebase)
+- **Phase A** ✅ — Core ingestion + clustering
+- **Phase A.5** ✅ — Virality scoring + bot signal pipeline
 - **Phase B** — Deterministic lifecycle state machine
 - **Phase C** — Integrity & coordination detection
 - **Phase D** — Hybrid probabilistic refinement (Hawkes + HMM)
@@ -46,13 +47,15 @@ python run.py --continuous
 
 ```
 mindshare_engine/
-├── config.py          # All config + 16 domain seed lexicons
-├── database.py        # Postgres schema + connection pool
-├── embedder.py        # Sentence-transformer wrapper
-├── frontier_builder.py # 3-layer query budget (exploit/balance/explore)
-├── twitter_ingest.py  # X Pro ingestion + rate limit handling
-├── cluster_engine.py  # Narrative clustering + birth detection + domain assignment
-└── window_runner.py   # 5-min pipeline orchestrator
+├── config.py            # All config + 16 domain seed lexicons
+├── database.py          # Postgres schema + connection pool
+├── embedder.py          # Sentence-transformer wrapper
+├── frontier_builder.py  # 3-layer query budget (exploit/balance/explore)
+├── twitter_ingest.py    # X Pro ingestion + rate limit handling
+├── cluster_engine.py    # Narrative clustering + birth detection + domain assignment
+├── virality_scorer.py   # Composite virality index (6-dimensional scoring)
+├── signal_emitter.py    # Bot signal pipeline (webhook delivery + cooldown)
+└── window_runner.py     # 5-min pipeline orchestrator
 ```
 
 ## 16 Domains
@@ -75,6 +78,43 @@ mindshare_engine/
 | creator_economy | YouTube, TikTok, influencers |
 | nature_animals | Animals, wildlife, pets |
 | meme_platform | Memes, Twitter meta, shitposting |
+
+## Virality Index
+
+Each narrative is scored on six dimensions every window:
+
+| Component | Weight | What it measures |
+|-----------|--------|-----------------|
+| Velocity | 25% | Tweet volume vs rolling baseline |
+| Acceleration | 20% | Rate of velocity change (is growth speeding up?) |
+| Spread | 20% | Unique author growth rate |
+| Engagement | 15% | Amplification ratio (retweets + quotes + likes per tweet) |
+| Influencer | 10% | High-follower accounts participating |
+| Freshness | 10% | Recency bonus (newer narratives score higher) |
+
+Scores are normalised to **[0, 1]** via sigmoid functions. Narratives above the signal threshold (default 0.55) are emitted to the bot webhook. Scores above the alert threshold (0.75) are tagged as **ALERT** tier.
+
+### Bot Signal Flow
+
+```
+Window Pipeline → Virality Scorer → Signal Emitter → Webhook → Bot
+                                         ↓
+                                    virality_signals (DB)
+                                         ↓
+                                  --signals CLI / API polling
+```
+
+Signals are delivered as structured JSON webhooks compatible with any consumer (Telegram, Discord, custom). Per-narrative cooldown prevents spam.
+
+### CLI
+
+```bash
+# View latest virality signals
+python run.py --signals
+
+# View score trend for a specific narrative
+python run.py --trend <narrative_id>
+```
 
 ## Performance Targets (Phase A)
 - < 120s per window

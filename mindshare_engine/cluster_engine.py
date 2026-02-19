@@ -249,7 +249,7 @@ class ClusterEngine:
         for row in rows:
             narrative_id = str(row[0])
             execute("""
-                UPDATE narratives SET state = 'incubating', updated_at = NOW() WHERE id = %s
+                UPDATE narratives SET state = 'emerging', updated_at = NOW() WHERE id = %s
             """, (narrative_id,))
             logger.info(f"Birth detected: narrative {narrative_id}")
 
