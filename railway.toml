@@ -3,4 +3,4 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-cronSchedule = "*/15 * * * *"
+cronSchedule = "*/5 * * * *"
