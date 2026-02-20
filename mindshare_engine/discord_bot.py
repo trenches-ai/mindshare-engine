@@ -241,6 +241,7 @@ class MindshareBot(discord.Client):
             "engagement": "Engage",
             "influencer": "Influencer",
             "freshness": "Fresh",
+            "emotional": "Emotional",
         }
         lines = []
         for key, display in labels.items():
