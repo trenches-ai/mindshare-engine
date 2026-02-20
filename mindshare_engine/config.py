@@ -193,3 +193,8 @@ DISCORD_BOT_AVATAR_URL = os.getenv("DISCORD_BOT_AVATAR_URL", "")
 DISCORD_ALERT_HIGH_CONVICTION = os.getenv("DISCORD_ALERT_HIGH_CONVICTION", "true").lower() == "true"
 DISCORD_ALERT_MODERATE = os.getenv("DISCORD_ALERT_MODERATE", "false").lower() == "true"
 DISCORD_POST_SUMMARY = os.getenv("DISCORD_POST_SUMMARY", "true").lower() == "true"
+
+# --- Discord Bot (standalone poller) ---
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
+DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0") or "0")
+DISCORD_POLL_INTERVAL = int(os.getenv("DISCORD_POLL_INTERVAL", "30"))
