@@ -1,20 +1,25 @@
 """
-virality_scorer.py - v2 Composite virality index for narrative breakout detection.
+virality_scorer.py - v4 Composite virality index for narrative breakout detection.
 
-Scores each active narrative on SEVEN dimensions per window:
-  1. Velocity      (18%) — tweet volume vs rolling 30-min baseline
-  2. Acceleration  (20%) — second derivative of velocity
-  3. Spread        (20%) — unique author growth rate (best bot filter)
-  4. Engagement    (17%) — weighted amplification (likes/RTs + quotes/replies + media boost)
-  5. Influencer    (10%) — high-follower / verified author participation
-  6. Freshness      (5%) — recency decay with sustained-mode override
-  7. Emotional     (10%) — embedding-based arousal + valence intensity
+Scores each active narrative on ELEVEN dimensions per window:
+  1. Velocity       (8%)  — tweet volume vs rolling 30-min baseline
+  2. Acceleration  (16%)  — second derivative of velocity
+  3. Spread        (18%)  — unique author growth rate (best bot filter)
+  4. Engagement    (11%)  — weighted amplification (likes/RTs + quotes/replies + media boost)
+  5. Influencer     (6%)  — high-follower / verified author participation
+  6. Freshness      (5%)  — recency decay with sustained-mode override
+  7. Emotional      (8%)  — embedding-based arousal + valence intensity
+  8. Remix          (7%)  — quote tweet participation (cultural remix)
+  9. Controversy    (6%)  — reply-to-like ratio (debate signal)
+ 10. Smart Account (10%)  — weighted account tier participation (WHO is talking)
+ 11. Coordination   (5%)  — cross-account correlation detection
 
 Post-scoring multipliers:
   - Visual Virality    ×1.12 when ≥50% of window posts contain media
   - Category Boost     +15% velocity/spread for quiet domains
   - Age Demotion       -20% for narratives >48h old without fresh acceleration
   - Dynamic Reweighting  14% shifted from saturated volume signals to quality signals
+  - First-Mover Boost  up to +20% if trend was started by high-tier account
 """
 from __future__ import annotations
 
@@ -57,6 +62,9 @@ class ViralityScorer:
             )
             final_score = multipliers["final_score"]
 
+            # v4: Extract who's talking data
+            whos_talking = self._extract_whos_talking(nid, window_time)
+
             record = {
                 "narrative_id": nid,
                 "window_time": window_time,
@@ -72,6 +80,9 @@ class ViralityScorer:
                 "unique_authors": n["unique_authors"],
                 "top_terms": self._extract_top_terms(nid, window_time),
                 "top_tweets": self._extract_top_tweets(nid, window_time),
+                # v4 additions
+                "first_mover": multipliers.get("first_mover"),
+                "whos_talking": whos_talking,
             }
             self._store_signal(record)
             scored.append(record)
@@ -85,7 +96,7 @@ class ViralityScorer:
         return scored
 
     # ------------------------------------------------------------------
-    # 7 Component calculations
+    # 11 Component calculations (v4)
     # ------------------------------------------------------------------
 
     def _compute_components(
@@ -102,6 +113,10 @@ class ViralityScorer:
         influencer = self._influencer_signal(current["narrative_id"], window_time)
         freshness = self._freshness(current, window_time, history)
         emotional = self._emotional_intensity(current["narrative_id"], window_time)
+        remix = self._remix_signal(current)
+        controversy = self._controversy_signal(current)
+        smart_account = self._smart_account_signal(current["narrative_id"], window_time)
+        coordination = self._coordination_signal(current["narrative_id"], window_time)
 
         return {
             "velocity": round(velocity, 4),
@@ -111,6 +126,10 @@ class ViralityScorer:
             "influencer": round(influencer, 4),
             "freshness": round(freshness, 4),
             "emotional": round(emotional, 4),
+            "remix": round(remix, 4),
+            "controversy": round(controversy, 4),
+            "smart_account": round(smart_account, 4),
+            "coordination": round(coordination, 4),
         }
 
     def _velocity(self, current: dict, history: list[dict]) -> float:
@@ -274,6 +293,138 @@ class ViralityScorer:
         intensity = total_signals / max(total_words, 1)
         return self._sigmoid(intensity, midpoint=config.EMOTIONAL_MIDPOINT, steepness=3.0)
 
+    def _remix_signal(self, current: dict) -> float:
+        """
+        Measure quote-tweet participation — indicates cultural remix behaviour.
+        High quote ratio = people adding commentary = narrative gaining traction.
+        """
+        total_engagement = (
+            current.get("total_likes", 0)
+            + current.get("total_rts", 0)
+            + current.get("total_quotes", 0)
+            + current.get("total_replies", 0)
+        )
+        if total_engagement == 0:
+            return 0.0
+
+        quote_ratio = current.get("total_quotes", 0) / total_engagement
+        return self._sigmoid(quote_ratio, midpoint=config.REMIX_MIDPOINT, steepness=8.0)
+
+    def _controversy_signal(self, current: dict) -> float:
+        """
+        Measure reply-to-like ratio — high ratio indicates debate/controversy.
+        Controversial content drives sustained engagement and shares.
+        """
+        likes = current.get("total_likes", 0)
+        replies = current.get("total_replies", 0)
+
+        if likes == 0:
+            # If no likes but has replies, that's very controversial
+            return 1.0 if replies > 10 else 0.0
+
+        reply_ratio = replies / likes
+        return self._sigmoid(reply_ratio, midpoint=config.CONTROVERSY_MIDPOINT, steepness=5.0)
+
+    def _smart_account_signal(self, narrative_id: str, window_time: datetime) -> float:
+        """
+        v4: Weighted account tier participation — WHO is talking matters.
+        
+        Each account is weighted by tier:
+          - mega (1M+):   5x
+          - macro (100K+): 3x
+          - mid (10K+):   1.5x
+          - small (1K+):  1x
+          - nano (<1K):   0.5x
+        
+        Higher weighted score = more influential accounts participating.
+        """
+        rows = execute("""
+            SELECT a.follower_count
+            FROM tweets_raw t
+            JOIN authors a ON a.author_id = t.author_id
+            WHERE t.narrative_id = %s AND t.window_time = %s
+        """, (narrative_id, window_time.isoformat()), fetch=True) or []
+
+        if not rows:
+            return 0.0
+
+        weighted_sum = 0.0
+        for (follower_count,) in rows:
+            tier = self._classify_tier(follower_count or 0)
+            weighted_sum += config.ACCOUNT_TIER_WEIGHTS.get(tier, 0.5)
+
+        # Normalize by number of tweets
+        weighted_avg = weighted_sum / len(rows)
+        
+        return self._sigmoid(
+            weighted_avg,
+            midpoint=config.SMART_ACCOUNT_MIDPOINT,
+            steepness=config.SMART_ACCOUNT_STEEPNESS,
+        )
+
+    def _coordination_signal(self, narrative_id: str, window_time: datetime) -> float:
+        """
+        v4: Cross-account correlation detection.
+        
+        Detects when multiple mid/macro/mega accounts tweet about the same 
+        narrative within a short time window — indicates coordinated interest
+        or breaking news that multiple sources are picking up.
+        
+        Returns high signal when:
+          - 2+ high-tier accounts (macro/mega) tweet same topic
+          - Multiple mid-tier accounts tweet within short window
+        """
+        cross_window = config.CROSS_ACCOUNT_WINDOW_MINUTES
+        
+        rows = execute("""
+            SELECT a.follower_count, t.created_at, a.username
+            FROM tweets_raw t
+            JOIN authors a ON a.author_id = t.author_id
+            WHERE t.narrative_id = %s 
+              AND t.window_time >= %s::timestamptz - INTERVAL '%s minutes'
+            ORDER BY t.created_at ASC
+        """, (narrative_id, window_time.isoformat(), str(cross_window)), fetch=True) or []
+
+        if len(rows) < 2:
+            return 0.0
+
+        # Count distinct accounts by tier
+        tier_counts = {"mega": 0, "macro": 0, "mid": 0, "small": 0, "nano": 0}
+        seen_usernames = set()
+        
+        for follower_count, _, username in rows:
+            if username and username not in seen_usernames:
+                seen_usernames.add(username)
+                tier = self._classify_tier(follower_count or 0)
+                tier_counts[tier] += 1
+
+        # High signal if multiple high-tier accounts participate
+        high_tier_count = tier_counts["mega"] + tier_counts["macro"]
+        mid_plus_count = high_tier_count + tier_counts["mid"]
+
+        if high_tier_count >= config.CROSS_ACCOUNT_MIN_TIERS:
+            # Strong coordination signal
+            return self._sigmoid(high_tier_count, midpoint=2.0, steepness=1.0)
+        elif mid_plus_count >= 3:
+            # Moderate coordination
+            return self._sigmoid(mid_plus_count, midpoint=4.0, steepness=0.5)
+        
+        return 0.0
+
+    @staticmethod
+    def _classify_tier(follower_count: int) -> str:
+        """Classify account into tier based on follower count."""
+        if follower_count >= config.ACCOUNT_TIER_THRESHOLDS["mega"]:
+            return "mega"
+        elif follower_count >= config.ACCOUNT_TIER_THRESHOLDS["macro"]:
+            return "macro"
+        elif follower_count >= config.ACCOUNT_TIER_THRESHOLDS["mid"]:
+            return "mid"
+        elif follower_count >= config.ACCOUNT_TIER_THRESHOLDS["small"]:
+            return "small"
+        else:
+            return "nano"
+
     # ------------------------------------------------------------------
     # Post-scoring multipliers
     # ------------------------------------------------------------------
@@ -288,10 +439,11 @@ class ViralityScorer:
         window_time: datetime,
         history: list[dict],
     ) -> dict:
-        """Apply visual, category, and age multipliers. Return final score + explanation."""
+        """Apply visual, category, age, and first-mover multipliers. Return final score + explanation."""
         score = raw_score
         applied = {}
         why_parts = []
+        first_mover_info = None
 
         # Visual virality multiplier
         if media_ratio >= config.VISUAL_VIRALITY_THRESHOLD:
@@ -326,6 +478,24 @@ class ViralityScorer:
                     applied["age_demotion"] = config.NARRATIVE_AGE_DEMOTION
                     why_parts.append(f"Stale -{config.NARRATIVE_AGE_DEMOTION:.0%}")
 
+        # v4: First-mover boost — if the first tweet came from a high-tier account
+        first_mover_info = self._get_first_mover(current["narrative_id"], window_time)
+        if first_mover_info:
+            tier = first_mover_info.get("tier", "nano")
+            boost = config.FIRST_MOVER_TIER_BOOST.get(tier, 0.0)
+            if boost > 0:
+                score *= (1.0 + boost)
+                applied["first_mover"] = boost
+                username = first_mover_info.get("username", "unknown")
+                why_parts.append(f"First-mover @{username} ({tier}) +{boost:.0%}")
+
+        # v4: Cross-account coordination boost
+        if components.get("coordination", 0) > 0.6:
+            coord_boost = config.CROSS_ACCOUNT_BOOST
+            score *= (1.0 + coord_boost)
+            applied["coordination_boost"] = coord_boost
+            why_parts.append(f"Multi-account +{coord_boost:.0%}")
+
         score = max(0.0, min(1.0, score))
 
         # Build the one-line "why" explanation
@@ -341,6 +511,81 @@ class ViralityScorer:
             "raw_score": round(raw_score, 4),
             "applied": applied,
             "why": why,
+            "first_mover": first_mover_info,
+        }
+
+    def _get_first_mover(self, narrative_id: str, window_time: datetime) -> dict | None:
+        """
+        Find the first tweet in this narrative and return info about who posted it.
+        
+        Returns dict with: username, follower_count, tier, tweet_id, created_at
+        """
+        first_mover_window = config.FIRST_MOVER_WINDOW_MINUTES
+        
+        rows = execute("""
+            SELECT t.tweet_id, t.created_at, a.username, a.follower_count
+            FROM tweets_raw t
+            JOIN authors a ON a.author_id = t.author_id
+            WHERE t.narrative_id = %s
+              AND t.window_time >= %s::timestamptz - INTERVAL '%s minutes'
+            ORDER BY t.created_at ASC
+            LIMIT 1
+        """, (narrative_id, window_time.isoformat(), str(first_mover_window)), fetch=True)
+
+        if not rows:
+            return None
+
+        tweet_id, created_at, username, follower_count = rows[0]
+        tier = self._classify_tier(follower_count or 0)
+
+        return {
+            "tweet_id": str(tweet_id),
+            "created_at": created_at.isoformat() if created_at else None,
+            "username": username or "unknown",
+            "follower_count": follower_count or 0,
+            "tier": tier,
+        }
+
+    def _extract_whos_talking(self, narrative_id: str, window_time: datetime) -> dict:
+        """
+        v4: Extract "who's talking" data — notable accounts participating in this narrative.
+        
+        Returns:
+            {
+                "tier_breakdown": {"mega": 1, "macro": 3, ...},
+                "notable_accounts": [{"username": "x", "tier": "mega", "followers": 1M}, ...],
+                "first_mover": {...}
+            }
+        """
+        rows = execute("""
+            SELECT DISTINCT a.username, a.follower_count
+            FROM tweets_raw t
+            JOIN authors a ON a.author_id = t.author_id
+            WHERE t.narrative_id = %s AND t.window_time = %s
+        """, (narrative_id, window_time.isoformat()), fetch=True) or []
+
+        tier_breakdown = {"mega": 0, "macro": 0, "mid": 0, "small": 0, "nano": 0}
+        notable_accounts = []
+
+        for username, follower_count in rows:
+            tier = self._classify_tier(follower_count or 0)
+            tier_breakdown[tier] += 1
+
+            # Track notable accounts (mid tier and above)
+            if tier in ("mega", "macro", "mid") and username:
+                notable_accounts.append({
+                    "username": username,
+                    "tier": tier,
+                    "follower_count": follower_count or 0,
+                })
+
+        # Sort notable accounts by follower count descending
+        notable_accounts.sort(key=lambda x: -x["follower_count"])
+
+        return {
+            "tier_breakdown": tier_breakdown,
+            "notable_accounts": notable_accounts[:5],  # Top 5 notable accounts
+            "total_accounts": len(rows),
         }
 
     # ------------------------------------------------------------------

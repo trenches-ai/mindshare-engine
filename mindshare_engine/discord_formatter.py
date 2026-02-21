@@ -1,6 +1,9 @@
 """
 discord_formatter.py - Discord embed builder for narrative breakout signals.
 
+v4 Update: Now includes "Who's Talking" section with account tier breakdown,
+first-mover detection, and cross-account correlation visualization.
+
 Transforms virality signals into rich Discord webhook embed payloads with
 tiered color coding, component breakdowns, and domain-aware formatting.
 
@@ -41,26 +44,42 @@ DOMAIN_ICONS: dict[str, str] = {
     "sports_esports":         "\U0001f3c6",          # trophy
     "creator_economy":        "\U0001f3ac",          # clapperboard
     "nature_animals":         "\U0001f43e",          # paw prints
+    "entertainment_pop":      "\U0001f3ac",          # clapperboard
     "meme_platform":          "\U0001f921",          # clown
 }
 
 STATE_LABELS: dict[str, str] = {
     "incubating": "\U0001f95a Incubating",
     "emerging":   "\U0001f331 Emerging",
+    "rising":     "\U0001f4c8 Rising",
     "breaking":   "\U0001f525 Breaking",
     "dominant":   "\U0001f451 Dominant",
     "declining":  "\U0001f4c9 Declining",
     "dormant":    "\U0001f4a4 Dormant",
 }
 
+# v4: Updated weights for 11 signals (must match config.py)
 COMPONENT_META: dict[str, tuple[str, str, int]] = {
-    "velocity":     ("\U0001f4e8", "Tweet Volume",        18),
-    "acceleration": ("\U0001f680", "Growth Rate",         20),
-    "spread":       ("\U0001f465", "Author Spread",       20),
-    "engagement":   ("\U0001f4e3", "Amplification",       17),
-    "influencer":   ("\U0001f451", "Influencer Signal",   10),
-    "freshness":    ("\u23f0",     "Freshness",            5),
-    "emotional":    ("\U0001f525", "Emotional Intensity",  10),
+    "velocity":      ("\U0001f4e8", "Tweet Volume",         8),
+    "acceleration":  ("\U0001f680", "Growth Rate",         16),
+    "spread":        ("\U0001f465", "Author Spread",       18),
+    "engagement":    ("\U0001f4e3", "Amplification",       11),
+    "influencer":    ("\U0001f451", "Influencer Signal",    6),
+    "freshness":     ("\u23f0",     "Freshness",            5),
+    "emotional":     ("\U0001f525", "Emotional Intensity",  8),
+    "remix":         ("\U0001f501", "Remix/Quote Rate",     7),
+    "controversy":   ("\U0001f4ac", "Controversy",          6),
+    "smart_account": ("\U0001f3af", "Smart Accounts",      10),  # v4 NEW
+    "coordination":  ("\U0001f517", "Cross-Account",        5),  # v4 NEW
+}
+
+# Account tier display info
+TIER_ICONS: dict[str, str] = {
+    "mega":  "\U0001f31f",   # star
+    "macro": "\U0001f525",   # fire
+    "mid":   "\u2728",       # sparkles
+    "small": "\u2022",       # bullet
+    "nano":  "",
 }
 
 
@@ -105,7 +124,7 @@ class DiscordFormatter:
             (
                 f"{domain_icon} {self._domain_display(domain)} | "
                 f"{state_label} | "
-                f"Score: **{display_score}/100** {self._score_bar(display_score)}"
+                f"Score: **{display_score}/100**"
             ),
         ]
 
@@ -120,12 +139,12 @@ class DiscordFormatter:
 
         metrics_lines = self._build_metrics_block(components)
         context_lines = self._build_context_block(signal, domain_icon)
-
+        whos_talking_block = self._build_whos_talking_block(signal)
         viral_tweets_block = self._build_viral_tweets_block(signal)
 
         fields = [
             {
-                "name": "\U0001f4ca BREAKOUT METRICS (v2 \u2014 7 signals)",
+                "name": "\U0001f4ca BREAKOUT METRICS (v4 \u2014 11 signals)",
                 "value": metrics_lines,
                 "inline": False,
             },
@@ -135,6 +154,14 @@ class DiscordFormatter:
                 "inline": False,
             },
         ]
+
+        # v4: Add "Who's Talking" section
+        if whos_talking_block:
+            fields.append({
+                "name": "\U0001f5e3\ufe0f WHO'S TALKING",
+                "value": whos_talking_block,
+                "inline": False,
+            })
 
         if viral_tweets_block:
             fields.append({
@@ -154,7 +181,7 @@ class DiscordFormatter:
             "fields": fields,
             "footer": {
                 "text": (
-                    f"Mindshare Engine v2 | "
+                    f"Mindshare Engine v4 | "
                     f"Window: {self._format_window_time(signal.get('window_time'))} | "
                     f"{config.WINDOW_MINUTES}-min cycle"
                 ),
@@ -241,14 +268,12 @@ class DiscordFormatter:
     # ------------------------------------------------------------------
 
     def _build_metrics_block(self, components: dict) -> str:
-        """Formatted multi-line metrics block for all 7 v2 signals."""
+        """Formatted multi-line metrics block for all 9 v3 signals."""
         lines = []
         for key, (icon, label, max_pts) in COMPONENT_META.items():
             raw = components.get(key, 0.0)
             pts = round(raw * max_pts)
-            arrow = self._trend_arrow(raw)
-            bar = self._mini_bar(raw)
-            lines.append(f"{icon} {arrow} **{label}:** {pts}/{max_pts} pts {bar}")
+            lines.append(f"{icon} **{label}:** {pts}/{max_pts} pts")
         return "\n".join(lines)
 
     def _build_context_block(self, signal: dict, domain_icon: str) -> str:
@@ -257,7 +282,7 @@ class DiscordFormatter:
 
         tweet_count = signal.get("tweet_count", 0)
         unique_authors = signal.get("unique_authors", 0)
-        parts.append(f"{domain_icon} **Tweets:** {tweet_count} | **Authors:** {unique_authors}")
+        parts.append(f"**Tweets:** {tweet_count} | **Authors:** {unique_authors}")
 
         top_terms = signal.get("top_terms", [])
         if top_terms:
@@ -324,6 +349,75 @@ class DiscordFormatter:
 
         return "\n".join(lines)
 
+    def _build_whos_talking_block(self, signal: dict) -> str:
+        """
+        v4: Build "Who's Talking" section showing account tiers and notable participants.
+        
+        Shows:
+          - First-mover info (who posted first)
+          - Tier breakdown (mega/macro/mid/small/nano)
+          - Notable accounts participating (top 5 by followers)
+        """
+        whos_talking = signal.get("whos_talking", {})
+        first_mover = signal.get("first_mover")
+        
+        if not whos_talking and not first_mover:
+            return ""
+        
+        lines = []
+        
+        # First-mover info
+        if first_mover:
+            username = first_mover.get("username", "unknown")
+            tier = first_mover.get("tier", "nano")
+            tier_icon = TIER_ICONS.get(tier, "")
+            followers = first_mover.get("follower_count", 0)
+            followers_display = self._format_follower_count(followers)
+            tweet_url = ""
+            if first_mover.get("tweet_id"):
+                tweet_url = f"https://x.com/{username}/status/{first_mover['tweet_id']}"
+            
+            if tweet_url:
+                lines.append(f"\U0001f3c1 **First Mover:** [{tier_icon} @{username}]({tweet_url}) ({followers_display} followers)")
+            else:
+                lines.append(f"\U0001f3c1 **First Mover:** {tier_icon} @{username} ({followers_display} followers)")
+        
+        # Tier breakdown
+        tier_breakdown = whos_talking.get("tier_breakdown", {})
+        if tier_breakdown:
+            tier_parts = []
+            for tier_name in ["mega", "macro", "mid", "small", "nano"]:
+                count = tier_breakdown.get(tier_name, 0)
+                if count > 0:
+                    tier_icon = TIER_ICONS.get(tier_name, "")
+                    tier_parts.append(f"{tier_icon}{tier_name.title()}: {count}")
+            if tier_parts:
+                lines.append(f"\U0001f4ca **Account Mix:** {' | '.join(tier_parts)}")
+        
+        # Notable accounts (top 5 by followers)
+        notable = whos_talking.get("notable_accounts", [])
+        if notable:
+            notable_strs = []
+            for acc in notable[:5]:
+                tier = acc.get("tier", "mid")
+                tier_icon = TIER_ICONS.get(tier, "")
+                username = acc.get("username", "")
+                followers = self._format_follower_count(acc.get("follower_count", 0))
+                notable_strs.append(f"{tier_icon}[@{username}](https://x.com/{username}) ({followers})")
+            lines.append(f"\U0001f31f **Notable:** {', '.join(notable_strs)}")
+        
+        return "\n".join(lines) if lines else ""
+
+    @staticmethod
+    def _format_follower_count(count: int) -> str:
+        """Format follower count as compact string (1.2M, 45K, etc)."""
+        if count >= 1_000_000:
+            return f"{count / 1_000_000:.1f}M"
+        elif count >= 1_000:
+            return f"{count / 1_000:.1f}K"
+        else:
+            return str(count)
+
     def _build_component_fields(self, components: dict) -> list[dict]:
         """Inline fields for the top 3 components (compact view)."""
         scored = []
@@ -335,9 +429,8 @@ class DiscordFormatter:
         scored.sort(key=lambda x: -x[2])
         fields = []
         for icon, label, pts, max_pts, raw in scored[:3]:
-            arrow = self._trend_arrow(raw)
             fields.append({
-                "name": f"{icon} {arrow} {label}",
+                "name": f"{icon} {label}",
                 "value": f"**{pts}**/{max_pts} pts",
                 "inline": True,
             })
@@ -354,6 +447,11 @@ class DiscordFormatter:
             badges.append(f"\U0001f30d Category +{(multipliers['category_boost'] - 1):.0%}")
         if "age_demotion" in multipliers:
             badges.append(f"\u23f3 Stale -{multipliers['age_demotion']:.0%}")
+        # v4: New multiplier badges
+        if "first_mover" in multipliers:
+            badges.append(f"\U0001f3c1 First-mover +{multipliers['first_mover']:.0%}")
+        if "coordination_boost" in multipliers:
+            badges.append(f"\U0001f517 Multi-account +{multipliers['coordination_boost']:.0%}")
         if not badges:
             return ""
         return "\U0001f3f7\ufe0f " + " \u2022 ".join(badges)
@@ -378,26 +476,6 @@ class DiscordFormatter:
         if tier == "MODERATE":
             return "\U0001f7e1"
         return "\U0001f534"
-
-    @staticmethod
-    def _score_bar(display_score: int, width: int = 10) -> str:
-        filled = round(display_score / 100 * width)
-        return "\u2588" * filled + "\u2591" * (width - filled)
-
-    @staticmethod
-    def _mini_bar(raw: float, width: int = 6) -> str:
-        filled = round(raw * width)
-        return "\u2588" * filled + "\u2591" * (width - filled)
-
-    @staticmethod
-    def _trend_arrow(raw: float) -> str:
-        if raw >= 0.7:
-            return "\u2b06\ufe0f"
-        if raw >= 0.4:
-            return "\u2197\ufe0f"
-        if raw >= 0.2:
-            return "\u27a1\ufe0f"
-        return "\u2198\ufe0f"
 
     @staticmethod
     def _build_search_url(top_terms: list[str]) -> str:

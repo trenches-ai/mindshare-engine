@@ -8,8 +8,23 @@ from loguru import logger
 
 import tweepy
 
+from mindshare_engine import config
 from mindshare_engine.config import TWITTER_BEARER_TOKEN
 from mindshare_engine.database import execute
+
+
+def classify_account_tier(follower_count: int) -> str:
+    """Classify account into tier based on follower count."""
+    if follower_count >= config.ACCOUNT_TIER_THRESHOLDS["mega"]:
+        return "mega"
+    elif follower_count >= config.ACCOUNT_TIER_THRESHOLDS["macro"]:
+        return "macro"
+    elif follower_count >= config.ACCOUNT_TIER_THRESHOLDS["mid"]:
+        return "mid"
+    elif follower_count >= config.ACCOUNT_TIER_THRESHOLDS["small"]:
+        return "small"
+    else:
+        return "nano"
 
 
 class TwitterIngest:
@@ -187,11 +202,15 @@ class TwitterIngest:
                     continue
                 for user in response.data:
                     metrics = user.public_metrics or {}
+                    follower_count = metrics.get("followers_count", 0)
                     results.append({
                         "author_id": str(user.id),
                         "username": user.username,
                         "account_created_at": user.created_at.isoformat() if user.created_at else None,
-                        "follower_count": metrics.get("followers_count", 0),
+                        "follower_count": follower_count,
+                        "following_count": metrics.get("following_count", 0),
+                        "tweet_count": metrics.get("tweet_count", 0),
+                        "account_tier": classify_account_tier(follower_count),
                     })
             except tweepy.TooManyRequests:
                 logger.warning("Rate limit hit fetching authors")

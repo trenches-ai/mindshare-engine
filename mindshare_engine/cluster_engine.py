@@ -269,7 +269,12 @@ class ClusterEngine:
         result = {}
         for row in rows:
             nid, centroid_json, primary_domain = row
-            centroid = np.array(json.loads(centroid_json)) if centroid_json else None
+            if centroid_json is None:
+                centroid = None
+            elif isinstance(centroid_json, list):
+                centroid = np.array(centroid_json)
+            else:
+                centroid = np.array(json.loads(centroid_json))
             if centroid is not None:
                 result[str(nid)] = {
                     "id": str(nid),
@@ -284,8 +289,8 @@ class ClusterEngine:
             execute("""
                 INSERT INTO tweets_raw
                     (tweet_id, narrative_id, author_id, content, embedding, window_time,
-                     retweet_count, reply_count, quote_count, like_count, has_media)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     retweet_count, reply_count, quote_count, like_count, has_media, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (tweet_id) DO NOTHING
             """, (
                 tweet["tweet_id"],
@@ -299,6 +304,7 @@ class ClusterEngine:
                 tweet.get("quote_count", 0),
                 tweet.get("like_count", 0),
                 tweet.get("has_media", False),
+                tweet.get("created_at"),  # v4: for first-mover tracking
             ))
         except Exception as e:
             logger.error(f"Failed to store tweet {tweet.get('tweet_id')}: {e}")
