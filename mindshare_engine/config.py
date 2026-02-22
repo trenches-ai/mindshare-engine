@@ -10,7 +10,7 @@ load_dotenv()
 # --- API & DB ---
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mindshare")
-WINDOW_MINUTES = int(os.getenv("WINDOW_MINUTES", "5"))
+WINDOW_MINUTES = int(os.getenv("WINDOW_MINUTES", "30"))
 MAX_QUERIES_PER_WINDOW = int(os.getenv("MAX_QUERIES_PER_WINDOW", "300"))
 MIN_AUTHORS_FOR_BIRTH = int(os.getenv("MIN_AUTHORS_FOR_BIRTH", "3"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -242,3 +242,69 @@ FIRST_MOVER_TIER_BOOST = {          # boost if first-mover is high-tier
     "small":  0.0,
     "nano":   0.0,
 }
+
+# --- CEX Watchlist (v4) ---
+# Centralized Exchange accounts to monitor for trend signals
+# When a CEX tweets about a narrative, it's a massive signal
+
+CEX_WATCHLIST = {
+    # Tier 1 - Largest global exchanges
+    "tier_1": [
+        "binance",           # Binance - world's largest
+        "coinbase",          # Coinbase - US publicly traded
+        "kaborodo",          # Kraken - major US/EU
+        "okx",               # OKX - large Asian exchange
+        "Bybit_Official",    # Bybit - derivatives leader
+    ],
+    
+    # Tier 2 - Major exchanges
+    "tier_2": [
+        "kucoincom",         # KuCoin - early listings
+        "cryptocom",         # Crypto.com - CRO ecosystem
+        "bitget",            # Bitget - copy trading
+        "gate_io",           # Gate.io - altcoin variety
+        "HTX_Global",        # HTX (formerly Huobi)
+        "MEXC_Official",     # MEXC - new token listings
+        "bitfinex",          # Bitfinex - whale exchange
+    ],
+    
+    # Tier 3 - Notable exchanges
+    "tier_3": [
+        "Gemini",            # Gemini - Winklevoss twins
+        "Bitstamp",          # Bitstamp - oldest exchange
+        "BingXOfficial",     # BingX
+        "Phemex_official",   # Phemex
+        "BitMartExchange",   # BitMart
+        "LBank_Exchange",    # LBank
+        "coinex_Official",   # CoinEx
+        "backpackexchange",  # Backpack - Solana focused
+        "aborodo",           # Upbit - Korean exchange
+        "bitaborodobank",    # Bitbank - Japanese exchange
+    ],
+    
+    # Announcement/listing accounts (high signal for new tokens)
+    "announcements": [
+        "binance_announce",  # Binance announcements
+        "CoinbaseAssets",    # Coinbase new listings
+        "okaborodox_announce", # OKX announcements
+        "BybitAnnouncements", # Bybit announcements
+        "KuCoin_News",       # KuCoin news
+    ],
+}
+
+# Flatten all CEX usernames for easy lookup
+CEX_ALL_USERNAMES = set()
+for tier_accounts in CEX_WATCHLIST.values():
+    CEX_ALL_USERNAMES.update(username.lower() for username in tier_accounts)
+
+# CEX signal boost - when a CEX tweets about a narrative
+CEX_SIGNAL_BOOST = {
+    "tier_1": 0.25,        # +25% virality boost
+    "tier_2": 0.15,        # +15% virality boost
+    "tier_3": 0.10,        # +10% virality boost
+    "announcements": 0.30, # +30% boost for official announcements
+}
+
+# Alert when multiple CEXs tweet same topic
+CEX_COORDINATION_THRESHOLD = 2  # Alert when 2+ CEXs tweet about same narrative
+CEX_COORDINATION_WINDOW_MINUTES = 60  # Within 1 hour

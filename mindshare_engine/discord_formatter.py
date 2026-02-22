@@ -306,10 +306,21 @@ class DiscordFormatter:
         Expects signal["top_tweets"]: list of dicts with keys:
             tweet_id, author_username, content, retweet_count, like_count,
             reply_count, quote_count
+            
+        For test signals with fake tweet IDs, links go to user profile instead.
+        For real signals from the pipeline, links go directly to the tweet.
         """
         top_tweets = signal.get("top_tweets", [])
         if not top_tweets:
             return ""
+
+        # Check if this looks like real data (tweet IDs from real pipeline are 19 digits)
+        # Test/fake IDs are often shorter or don't follow Twitter's ID format
+        def is_likely_real_tweet_id(tid: str) -> bool:
+            if not tid:
+                return False
+            # Real Twitter IDs are 18-19 digit numbers
+            return tid.isdigit() and 17 <= len(tid) <= 20
 
         lines = []
         for i, tw in enumerate(top_tweets[:3], 1):
@@ -326,9 +337,13 @@ class DiscordFormatter:
             likes = tw.get("like_count", 0)
             replies = tw.get("reply_count", 0)
 
-            # Direct link to the tweet
-            if username and tid:
+            # Build the link - use direct tweet link only if ID looks real
+            # Otherwise link to the user's profile (always works)
+            if username and is_likely_real_tweet_id(tid):
                 tweet_url = f"https://x.com/{username}/status/{tid}"
+            elif username:
+                # Fallback: link to user's profile
+                tweet_url = f"https://x.com/{username}"
             elif tid:
                 tweet_url = f"https://x.com/i/status/{tid}"
             else:
