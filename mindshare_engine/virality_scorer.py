@@ -381,9 +381,9 @@ class ViralityScorer:
             FROM tweets_raw t
             JOIN authors a ON a.author_id = t.author_id
             WHERE t.narrative_id = %s 
-              AND t.window_time >= %s::timestamptz - INTERVAL '%s minutes'
+              AND t.window_time >= %s::timestamptz - (%s * INTERVAL '1 minute')
             ORDER BY t.created_at ASC
-        """, (narrative_id, window_time.isoformat(), str(cross_window)), fetch=True) or []
+        """, (narrative_id, window_time.isoformat(), cross_window), fetch=True) or []
 
         if len(rows) < 2:
             return 0.0
@@ -527,10 +527,10 @@ class ViralityScorer:
             FROM tweets_raw t
             JOIN authors a ON a.author_id = t.author_id
             WHERE t.narrative_id = %s
-              AND t.window_time >= %s::timestamptz - INTERVAL '%s minutes'
+              AND t.window_time >= %s::timestamptz - (%s * INTERVAL '1 minute')
             ORDER BY t.created_at ASC
             LIMIT 1
-        """, (narrative_id, window_time.isoformat(), str(first_mover_window)), fetch=True)
+        """, (narrative_id, window_time.isoformat(), first_mover_window), fetch=True)
 
         if not rows:
             return None
@@ -714,13 +714,13 @@ class ViralityScorer:
             FROM narrative_windows
             WHERE narrative_id = %s
               AND window_time < %s
-              AND window_time >= %s::timestamptz - INTERVAL '%s minutes'
+              AND window_time >= %s::timestamptz - (%s * INTERVAL '1 minute')
             ORDER BY window_time ASC
         """, (
             narrative_id,
             window_time.isoformat(),
             window_time.isoformat(),
-            str(lookback_interval),
+            lookback_interval,
         ), fetch=True) or []
 
         return [
