@@ -76,7 +76,7 @@ class TwitterIngest:
 
             term = q["term"]
             try:
-                tweets = self._search_recent(term, max_results=50)
+                tweets = self._search_recent(term, max_results=25)
                 queries_run += 1
 
                 for t in tweets:

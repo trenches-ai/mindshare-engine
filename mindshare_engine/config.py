@@ -25,7 +25,7 @@ BIRTH_DENSITY_THRESHOLD = float(os.getenv("BIRTH_DENSITY_THRESHOLD", "0.6"))
 BUDGET_EXPLOITATION = 0.50  # High-velocity frontier terms
 BUDGET_LANE_BALANCE = 0.30  # Per-lane coverage balancing
 BUDGET_EXPLORATION = 0.20   # Random/novel term discovery
-MAX_TERMS_PER_WINDOW = 60
+MAX_TERMS_PER_WINDOW = 30
 
 # --- 16 Structural Domains ---
 DOMAINS = [
