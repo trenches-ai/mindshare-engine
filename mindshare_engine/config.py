@@ -10,7 +10,7 @@ load_dotenv()
 # --- API & DB ---
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mindshare")
-WINDOW_MINUTES = int(os.getenv("WINDOW_MINUTES", "5"))
+WINDOW_MINUTES = int(os.getenv("WINDOW_MINUTES", "30"))
 MAX_QUERIES_PER_WINDOW = int(os.getenv("MAX_QUERIES_PER_WINDOW", "300"))
 MIN_AUTHORS_FOR_BIRTH = int(os.getenv("MIN_AUTHORS_FOR_BIRTH", "3"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -25,7 +25,7 @@ BIRTH_DENSITY_THRESHOLD = float(os.getenv("BIRTH_DENSITY_THRESHOLD", "0.6"))
 BUDGET_EXPLOITATION = 0.50  # High-velocity frontier terms
 BUDGET_LANE_BALANCE = 0.30  # Per-lane coverage balancing
 BUDGET_EXPLORATION = 0.20   # Random/novel term discovery
-MAX_TERMS_PER_WINDOW = 60
+MAX_TERMS_PER_WINDOW = 30
 
 # --- 16 Structural Domains ---
 DOMAINS = [
@@ -130,15 +130,19 @@ VIRALITY_WINDOW_LOOKBACK = int(os.getenv("VIRALITY_WINDOW_LOOKBACK", "6"))
 VIRALITY_SIGNAL_THRESHOLD = float(os.getenv("VIRALITY_SIGNAL_THRESHOLD", "0.55"))
 VIRALITY_ALERT_THRESHOLD = float(os.getenv("VIRALITY_ALERT_THRESHOLD", "0.75"))
 
-# v2 weight presets — 7 signals (must sum to 1.0)
+# v4 weight presets — 11 signals (must sum to 1.0)
 VIRALITY_WEIGHTS = {
-    "velocity":     0.18,
-    "acceleration": 0.20,
-    "spread":       0.20,
-    "engagement":   0.17,
-    "influencer":   0.10,
-    "freshness":    0.05,
-    "emotional":    0.10,
+    "velocity":      0.08,   # reduced — less predictive than spread
+    "acceleration":  0.16,   # kept high — catches trends before peak
+    "spread":        0.18,   # boosted — most predictive signal
+    "engagement":    0.11,   # reduced — remix now separate
+    "influencer":    0.06,   # reduced — smart_account covers this better
+    "freshness":     0.05,   # kept same
+    "emotional":     0.08,   # slightly reduced
+    "remix":         0.07,   # quote tweet participation
+    "controversy":   0.06,   # reply-to-like ratio
+    "smart_account": 0.10,   # NEW v4 — weighted account tier participation
+    "coordination":  0.05,   # NEW v4 — cross-account correlation
 }
 
 # v2 sigmoid midpoints
@@ -151,6 +155,8 @@ ENGAGEMENT_MIDPOINT = 6.0           # engagements per tweet
 INFLUENCER_MIDPOINT = 0.06          # 6% high-follower ratio
 FRESHNESS_MIDPOINT_MINUTES = 45     # minutes old = midpoint
 EMOTIONAL_MIDPOINT = 0.65           # normalised arousal+valence score
+REMIX_MIDPOINT = 0.15               # 15% quote ratio = midpoint (quotes / total engagement)
+CONTROVERSY_MIDPOINT = 0.25         # replies / likes ratio — 0.25 = midpoint
 
 # v2 post-scoring multipliers
 VISUAL_VIRALITY_THRESHOLD = 0.50    # min fraction of media posts to apply boost
@@ -193,3 +199,112 @@ DISCORD_BOT_AVATAR_URL = os.getenv("DISCORD_BOT_AVATAR_URL", "")
 DISCORD_ALERT_HIGH_CONVICTION = os.getenv("DISCORD_ALERT_HIGH_CONVICTION", "true").lower() == "true"
 DISCORD_ALERT_MODERATE = os.getenv("DISCORD_ALERT_MODERATE", "false").lower() == "true"
 DISCORD_POST_SUMMARY = os.getenv("DISCORD_POST_SUMMARY", "true").lower() == "true"
+
+# --- Discord Bot (standalone poller) ---
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
+DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0") or "0")
+DISCORD_POLL_INTERVAL = int(os.getenv("DISCORD_POLL_INTERVAL", "30"))
+
+# --- Account Tier Tracking (v4) ---
+# Follower thresholds for account tier classification
+ACCOUNT_TIER_THRESHOLDS = {
+    "mega":   1_000_000,   # 1M+ followers - massive reach
+    "macro":  100_000,     # 100K+ - established influencer
+    "mid":    10_000,      # 10K+ - micro-influencer
+    "small":  1_000,       # 1K+ - engaged user
+    # below 1K = "nano" (default)
+}
+
+# Weight multipliers for account tiers when calculating "smart account" signal
+ACCOUNT_TIER_WEIGHTS = {
+    "mega":   5.0,    # mega accounts count 5x
+    "macro":  3.0,    # macro accounts count 3x
+    "mid":    1.5,    # mid accounts count 1.5x
+    "small":  1.0,    # small accounts count 1x
+    "nano":   0.5,    # nano accounts count 0.5x
+}
+
+# "Smart account" virality signal config
+SMART_ACCOUNT_MIDPOINT = 3.0      # weighted account score where sigmoid = 0.5
+SMART_ACCOUNT_STEEPNESS = 1.5     # steepness of sigmoid curve
+
+# Cross-account correlation detection
+CROSS_ACCOUNT_WINDOW_MINUTES = 10   # time window to detect coordinated posting
+CROSS_ACCOUNT_MIN_TIERS = 2         # min distinct high-tier accounts for correlation
+CROSS_ACCOUNT_BOOST = 0.15          # virality score boost when correlation detected
+
+# First-mover tracking
+FIRST_MOVER_WINDOW_MINUTES = 30     # how far back to look for first tweet
+FIRST_MOVER_TIER_BOOST = {          # boost if first-mover is high-tier
+    "mega":   0.20,
+    "macro":  0.12,
+    "mid":    0.05,
+    "small":  0.0,
+    "nano":   0.0,
+}
+
+# --- CEX Watchlist (v4) ---
+# Centralized Exchange accounts to monitor for trend signals
+# When a CEX tweets about a narrative, it's a massive signal
+
+CEX_WATCHLIST = {
+    # Tier 1 - Largest global exchanges
+    "tier_1": [
+        "binance",           # Binance - world's largest
+        "coinbase",          # Coinbase - US publicly traded
+        "kaborodo",          # Kraken - major US/EU
+        "okx",               # OKX - large Asian exchange
+        "Bybit_Official",    # Bybit - derivatives leader
+    ],
+    
+    # Tier 2 - Major exchanges
+    "tier_2": [
+        "kucoincom",         # KuCoin - early listings
+        "cryptocom",         # Crypto.com - CRO ecosystem
+        "bitget",            # Bitget - copy trading
+        "gate_io",           # Gate.io - altcoin variety
+        "HTX_Global",        # HTX (formerly Huobi)
+        "MEXC_Official",     # MEXC - new token listings
+        "bitfinex",          # Bitfinex - whale exchange
+    ],
+    
+    # Tier 3 - Notable exchanges
+    "tier_3": [
+        "Gemini",            # Gemini - Winklevoss twins
+        "Bitstamp",          # Bitstamp - oldest exchange
+        "BingXOfficial",     # BingX
+        "Phemex_official",   # Phemex
+        "BitMartExchange",   # BitMart
+        "LBank_Exchange",    # LBank
+        "coinex_Official",   # CoinEx
+        "backpackexchange",  # Backpack - Solana focused
+        "aborodo",           # Upbit - Korean exchange
+        "bitaborodobank",    # Bitbank - Japanese exchange
+    ],
+    
+    # Announcement/listing accounts (high signal for new tokens)
+    "announcements": [
+        "binance_announce",  # Binance announcements
+        "CoinbaseAssets",    # Coinbase new listings
+        "okaborodox_announce", # OKX announcements
+        "BybitAnnouncements", # Bybit announcements
+        "KuCoin_News",       # KuCoin news
+    ],
+}
+
+# Flatten all CEX usernames for easy lookup
+CEX_ALL_USERNAMES = set()
+for tier_accounts in CEX_WATCHLIST.values():
+    CEX_ALL_USERNAMES.update(username.lower() for username in tier_accounts)
+
+# CEX signal boost - when a CEX tweets about a narrative
+CEX_SIGNAL_BOOST = {
+    "tier_1": 0.25,        # +25% virality boost
+    "tier_2": 0.15,        # +15% virality boost
+    "tier_3": 0.10,        # +10% virality boost
+    "announcements": 0.30, # +30% boost for official announcements
+}
+
+# Alert when multiple CEXs tweet same topic
+CEX_COORDINATION_THRESHOLD = 2  # Alert when 2+ CEXs tweet about same narrative
+CEX_COORDINATION_WINDOW_MINUTES = 60  # Within 1 hour

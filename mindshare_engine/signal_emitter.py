@@ -128,7 +128,10 @@ class SignalEmitter:
         req = urllib.request.Request(
             self._discord_webhook_url,
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "MindshareEngine/1.0",
+            },
             method="POST",
         )
 

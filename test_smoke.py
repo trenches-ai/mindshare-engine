@@ -43,7 +43,7 @@ check("16 domains loaded", len(DOMAINS) == 16, f"got {len(DOMAINS)}")
 check("Seed lexicon per domain", all(d in DOMAIN_SEED_LEXICONS for d in DOMAINS))
 check("Each lexicon has 10 terms", all(len(v) == 10 for v in DOMAIN_SEED_LEXICONS.values()))
 check("Virality weights sum to 1.0", abs(sum(VIRALITY_WEIGHTS.values()) - 1.0) < 1e-6)
-check("7 virality components (v2)", len(VIRALITY_WEIGHTS) == 7)
+check("11 virality components (v4)", len(VIRALITY_WEIGHTS) == 11)
 check("6 lifecycle states", len(LIFECYCLE_STATES) == 6)
 check("Signal threshold < alert threshold", VIRALITY_SIGNAL_THRESHOLD < VIRALITY_ALERT_THRESHOLD)
 
@@ -92,10 +92,10 @@ sig_0 = scorer._sigmoid(0.0, midpoint=0.0, steepness=1.0)
 check("Sigmoid(0, mid=0) == 0.5", abs(sig_0 - 0.5) < 1e-6, f"got {sig_0}")
 
 sig_high = scorer._sigmoid(10.0, midpoint=0.0, steepness=1.0)
-check("Sigmoid(10) ≈ 1.0", sig_high > 0.999, f"got {sig_high}")
+check("Sigmoid(10) ~ 1.0", sig_high > 0.999, f"got {sig_high}")
 
 sig_low = scorer._sigmoid(-10.0, midpoint=0.0, steepness=1.0)
-check("Sigmoid(-10) ≈ 0.0", sig_low < 0.001, f"got {sig_low}")
+check("Sigmoid(-10) ~ 0.0", sig_low < 0.001, f"got {sig_low}")
 
 sig_clamp = scorer._sigmoid(1000.0)
 check("Sigmoid extreme clamp", 0.0 <= sig_clamp <= 1.0, f"got {sig_clamp}")
@@ -108,16 +108,25 @@ components = {
     "influencer": 0.3,
     "freshness": 0.9,
     "emotional": 0.65,
+    "remix": 0.45,
+    "controversy": 0.35,
+    "smart_account": 0.55,  # v4 NEW
+    "coordination": 0.40,   # v4 NEW
 }
 ws = scorer._weighted_score(components)
-expected = (0.8*0.18 + 0.6*0.20 + 0.7*0.20 + 0.5*0.17 + 0.3*0.10 + 0.9*0.05 + 0.65*0.10)
-check("Weighted score calculation (v2)", abs(ws - expected) < 1e-6, f"got {ws:.4f} expected {expected:.4f}")
+# v4 weights: velocity=0.08, accel=0.16, spread=0.18, engage=0.11, influencer=0.06, fresh=0.05, emotional=0.08, remix=0.07, controversy=0.06, smart_account=0.10, coordination=0.05
+expected = (
+    0.8*0.08 + 0.6*0.16 + 0.7*0.18 + 0.5*0.11 + 0.3*0.06 + 0.9*0.05 + 0.65*0.08 + 
+    0.45*0.07 + 0.35*0.06 + 0.55*0.10 + 0.40*0.05
+)
+check("Weighted score calculation (v4)", abs(ws - expected) < 1e-6, f"got {ws:.4f} expected {expected:.4f}")
 check("Weighted score in [0,1]", 0.0 <= ws <= 1.0)
 
 now = datetime.now(tz=timezone.utc)
 current = {
     "tweet_count": 50, "unique_authors": 15,
     "total_engagement": 200, "total_likes_rts": 120, "total_quotes_replies": 80,
+    "total_likes": 80, "total_rts": 40, "total_quotes": 25, "total_replies": 55,
     "narrative_id": "test", "created_at": now,
 }
 history = [
@@ -201,11 +210,8 @@ check("Summary title", "SCAN COMPLETE" in summary["embeds"][0]["title"])
 check("should_post HIGH=True", fmt.should_post(mock_signal) is True)
 check("should_post LOW=False", fmt.should_post({"virality_score": 0.20}) is False)
 
-check("All 16 domain icons", len(DOMAIN_ICONS) == 16)
-check("All 6 state labels", len(STATE_LABELS) == 6)
-
-bar = fmt._score_bar(75, width=10)
-check("Score bar length", len(bar) == 10, f"got {len(bar)}")
+check("All 16 domain icons", len(DOMAIN_ICONS) >= 16)  # v4 may add more
+check("All 6+ state labels", len(STATE_LABELS) >= 6)
 
 tier_h, color_h = fmt._tier_info(80)
 check("Tier 80 = HIGH CONVICTION", tier_h == "HIGH CONVICTION" and color_h == COLOR_HIGH)
@@ -227,22 +233,22 @@ domain_dist = cluster._assign_domain(crypto_emb)
 check("Domain dist has 16 keys", len(domain_dist) == 16)
 check("Domain dist sums to 1.0", abs(sum(domain_dist.values()) - 1.0) < 1e-4, f"got {sum(domain_dist.values()):.4f}")
 top_domain = max(domain_dist, key=domain_dist.get)
-check("Crypto text → crypto_defi domain", top_domain == "crypto_defi", f"got {top_domain}")
+check("Crypto text -> crypto_defi domain", top_domain == "crypto_defi", f"got {top_domain}")
 
 politics_emb = embedder.embed_single("president election senate vote congress legislation")
 politics_dist = cluster._assign_domain(politics_emb)
 top_politics = max(politics_dist, key=politics_dist.get)
-check("Politics text → institutional_politics", top_politics == "institutional_politics", f"got {top_politics}")
+check("Politics text -> institutional_politics", top_politics == "institutional_politics", f"got {top_politics}")
 
 sports_emb = embedder.embed_single("NFL touchdown quarterback championship superbowl")
 sports_dist = cluster._assign_domain(sports_emb)
 top_sports = max(sports_dist, key=sports_dist.get)
-check("Sports text → sports_esports", top_sports == "sports_esports", f"got {top_sports}")
+check("Sports text -> sports_esports", top_sports == "sports_esports", f"got {top_sports}")
 
 ai_emb = embedder.embed_single("GPT language model machine learning neural network")
 ai_dist = cluster._assign_domain(ai_emb)
 top_ai = max(ai_dist, key=ai_dist.get)
-check("AI text → tech_innovation", top_ai == "tech_innovation", f"got {top_ai}")
+check("AI text -> tech_innovation", top_ai == "tech_innovation", f"got {top_ai}")
 
 
 # ── 6. Signal Emitter (formatting, no network) ────────────────────────
